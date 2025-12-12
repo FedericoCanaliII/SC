@@ -12,27 +12,15 @@ from beam.mesh import BeamMeshCore
 class MaterialParser:
     def __init__(self, definition):
         self.segments = []
-        
-        # Default fallback
-        if not definition or isinstance(definition, str):
-            self.name = str(definition)
-            self.segments.append({'func': '30000e6*x', 'min': -1.0, 'max': 1.0})
-            return
 
-        try:
-            self.name = definition[0]
-            if len(definition) > 1 and isinstance(definition[1], (list, tuple)):
-                for segment in definition[1:]:
-                    if len(segment) >= 3:
-                        formula = segment[0]
-                        start = float(segment[1])
-                        end = float(segment[2])
-                        self.segments.append({'func': formula, 'min': start, 'max': end})
-            else:
-                self.segments.append({'func': '210000e6*x', 'min': -1.0, 'max': 1.0})
-        except Exception:
-            self.name = "Unknown"
-            self.segments.append({'func': '210000e6*x', 'min': -1.0, 'max': 1.0})
+        self.name = definition[0]
+        if len(definition) > 1 and isinstance(definition[1], (list, tuple)):
+            for segment in definition[1:]:
+                if len(segment) >= 3:
+                    formula = segment[0]
+                    start = float(segment[1])
+                    end = float(segment[2])
+                    self.segments.append({'func': formula, 'min': start, 'max': end})
 
     def evaluate(self, strain):
         # strain qui arriva già con il segno corretto secondo la convenzione Civile
@@ -51,14 +39,7 @@ class MaterialParser:
         if active_seg is None:
             # Se siamo in Trazione (strain < 0) e non è definito nulla:
             # Comportamento elastico debole (1/10 della rigidezza a compressione o un valore fisso)
-            # per evitare singolarità numeriche immediate.
-            if strain < 0:
-                # Esempio: Modulo elastico fittizio 3000 MPa per la trazione se non definita
-                E_tens = 1 # MPa
-                return E_tens * strain, E_tens
-
-            # Se siamo oltre la compressione massima (rottura):
-            return 0.0, 1 # Rigidezza residua minima per non far crashare il solver
+            return 0, 1 # Rigidezza residua minima per non far crashare il solver
             
         def eval_str(f_str, x_val):
             try:
@@ -120,20 +101,24 @@ class FemWorker(QThread):
         ny = self.params['ny']
         nz = self.params['nz']
         
+        # --- CORREZIONE 1: Rimosso il margine per coincidere con la visualizzazione ---
         min_x, max_x, min_y, max_y = self.core._get_section_bounding_box(self.section)
-        margin = 0.05
-        min_x = self.core._mm_to_m(min_x) - margin
-        max_x = self.core._mm_to_m(max_x) + margin
-        min_y = self.core._mm_to_m(min_y) - margin
-        max_y = self.core._mm_to_m(max_y) + margin
+        # margin = 0.05  <-- RIMOSSO QUESTO
+        min_x = self.core._mm_to_m(min_x) 
+        max_x = self.core._mm_to_m(max_x)
+        min_y = self.core._mm_to_m(min_y)
+        max_y = self.core._mm_to_m(max_y)
         
         Lx_bbox = max_x - min_x
         Ly_bbox = max_y - min_y
-        dx = Lx_bbox / max(1, nx)
-        dy = Ly_bbox / max(1, ny)
+        
+        # Evitiamo divisioni per zero se la sezione è puntiforme (caso limite)
+        dx = Lx_bbox / max(1, nx) if Lx_bbox > 1e-9 else 1.0
+        dy = Ly_bbox / max(1, ny) if Ly_bbox > 1e-9 else 1.0
         dz = L_beam / max(1, nz)
 
         voxel_mask = {}
+        # Usiamo i centri dei voxel per il check "inside", esattamente come in mesh.py
         xs = np.linspace(min_x + dx/2, max_x - dx/2, nx)
         ys = np.linspace(min_y + dy/2, max_y - dy/2, ny)
         active_indices = []
@@ -155,6 +140,7 @@ class FemWorker(QThread):
         for iz in range(nz + 1):
             z = zs[iz]
             for (ix, iy) in active_indices:
+                # Creiamo i nodi ai vertici del voxel attivo
                 for dx_i in [0, 1]:
                     for dy_i in [0, 1]:
                         key = (ix + dx_i, iy + dy_i, iz)
@@ -172,6 +158,7 @@ class FemWorker(QThread):
             for (ix, iy) in active_indices:
                 mat = voxel_mask[(ix, iy)]
                 try:
+                    # Mappatura nodi esagonali (Hex8)
                     n_indices = [
                         node_map[(ix, iy, iz)], node_map[(ix+1, iy, iz)], 
                         node_map[(ix+1, iy+1, iz)], node_map[(ix, iy+1, iz)],
@@ -184,6 +171,7 @@ class FemWorker(QThread):
         solid_node_count = len(coords)
         bar_elements = []
 
+        # --- BARRE LONGITUDINALI ---
         for bar in self.section.get('bars', []):
             bx = self.core._mm_to_m(bar['center'][0])
             by = self.core._mm_to_m(bar['center'][1])
@@ -193,15 +181,20 @@ class FemWorker(QThread):
             prev_node = -1
             for iz in range(nz + 1):
                 z = zs[iz]
+                # Aggiungiamo nodi barra esattamente alle stesse quote Z dei solidi
                 coords = np.vstack([coords, [bx, by, z]])
                 curr_node = len(coords) - 1
                 if prev_node != -1:
                     bar_elements.append({'nodes': [prev_node, curr_node], 'area': area, 'mat': mat, 'type': 'TRUSS_LONG'})
                 prev_node = curr_node
 
+        # --- CORREZIONE 2: STAFFE (Logica allineata a mesh.py) ---
         passo_staffe = self.params.get('stirrup_step', 0.0)
+        
         if passo_staffe > 0:
-            z_stirrups = np.arange(passo_staffe, L_beam, passo_staffe)
+            # Calcolo numero staffe come in mesh.py
+            num_staffe = max(1, int(math.ceil(L_beam / passo_staffe)))
+            
             for s in self.section.get('staffe', []):
                 pts_mm = s.get('points', [])
                 diam = self.core._mm_to_m(s.get('diam', 8))
@@ -209,27 +202,42 @@ class FemWorker(QThread):
                 mat = s.get('material')
                 if len(pts_mm) < 2: continue
                 pts_m = [(self.core._mm_to_m(p[0]), self.core._mm_to_m(p[1])) for p in pts_mm]
-                for z_s in z_stirrups:
-                    if z_s > L_beam: break
+                
+                # Ciclo identico alla visualizzazione
+                for i in range(num_staffe):
+                    z_s = (i + 0.5) * passo_staffe
+                    if z_s > L_beam: continue
+
                     first = -1
                     prev = -1
-                    for i, p in enumerate(pts_m):
+                    for k, p in enumerate(pts_m):
                         coords = np.vstack([coords, [p[0], p[1], z_s]])
                         curr = len(coords) - 1
-                        if i == 0: first = curr
+                        if k == 0: first = curr
                         else:
                             bar_elements.append({'nodes': [prev, curr], 'area': area, 'mat': mat, 'type': 'TRUSS_STIR'})
                         prev = curr
+                    
+                    # Chiudi la staffa se necessario
                     if len(pts_m) > 2 and pts_m[0] != pts_m[-1]:
                          bar_elements.append({'nodes': [prev, first], 'area': area, 'mat': mat, 'type': 'TRUSS_STIR'})
 
+        # --- Penalty Links (Collega le barre ai solidi vicini) ---
         penalty_pairs = []
         solid_coords = coords[:solid_node_count]
         if len(coords) > solid_node_count:
+            # Ottimizzazione: cerca solo tra i nodi solidi alla stessa Z (circa)
+            # Per semplicità qui manteniamo la ricerca globale ma riduciamo la tolleranza
             for i in range(solid_node_count, len(coords)):
+                # Cerca il nodo solido più vicino
                 dists = np.linalg.norm(solid_coords - coords[i], axis=1)
                 nearest_idx = np.argmin(dists)
-                if dists[nearest_idx] < 0.2: 
+                
+                # Tolleranza di collegamento (deve essere abbastanza grande da prendere il nodo, 
+                # ma non troppo da collegare cose lontane). dx è una buona stima.
+                search_radius = max(dx, dy) * 1.5 
+                
+                if dists[nearest_idx] < search_radius: 
                     penalty_pairs.append((i, nearest_idx))
 
         return coords, elements, bar_elements, penalty_pairs, solid_node_count
@@ -337,7 +345,7 @@ class FemWorker(QThread):
 
             load_factor = step / steps
             F_target = F_ext_total * load_factor
-            self.progress_update.emit(f"Step {step}/{steps} (Load: {load_factor:.2f})")
+            self.progress_update.emit(f"Step {step}/{steps} (Carico: {load_factor*100:.1f}%)")
             
             for it in range(iters):
                 rows, cols, data = [], [], []
@@ -469,7 +477,7 @@ class FemWorker(QThread):
                     eps_vm = math.sqrt(0.5*((eps[0]-eps[1])**2+(eps[1]-eps[2])**2+(eps[2]-eps[0])**2)+3*(eps[3]**2+eps[4]**2+eps[5]**2))
                     sign = 1.0 if np.sum(eps[:3]) < 0 else -1.0
                     sigma_scalar, _ = mat_obj.evaluate(eps_vm * sign)
-                    vm_avg += abs(sigma_scalar)
+                    vm_avg += sigma_scalar
                 
                 vm_avg /= len(el_dat['gps'])
                 for n in el_dat['nodes']:
@@ -587,7 +595,7 @@ class BeamCalcolo(QObject):
             self.ui.progressBar_beam.setValue(0)
 
         self.worker = FemWorker(section, materials_db, params)
-        self.worker.progress_update.connect(lambda s: print(f"[FEM] {s}")) 
+        self.worker.progress_update.connect(lambda s: print(f"[CG-FEM] {s}")) 
         self.worker.error_occurred.connect(self._on_error)
         self.worker.finished_computation.connect(self._on_success)
         
@@ -604,7 +612,7 @@ class BeamCalcolo(QObject):
             self.ui.progressBar_beam.setValue(0)
 
     def _on_success(self, history, coords, solid_elems, bar_elems, max_disp, stress_history, max_stress):
-        print(f"[FEM] Analisi completata. Max disp: {max_disp:.4f}, Max Stress: {max_stress:.2f}")
+        print(f"[CG-FEM] Analisi completata. Max disp: {max_disp:.4f}, Max Stress: {max_stress:.2f}")
         
         gl_widget = self.mesh_generator._ensure_gl_widget_in_ui()
         if gl_widget:

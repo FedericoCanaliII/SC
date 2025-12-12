@@ -39,7 +39,6 @@ class ReinforcementBar:
     color: Tuple[float, float, float, float]        # RGBA
     element_type: str = "long"
 
-
 # ------------------------------------------------------------------
 # Widget OpenGL
 # ------------------------------------------------------------------
@@ -65,15 +64,25 @@ class BeamMeshWidget(QOpenGLWidget):
         
         # Storie temporali (Liste di numpy arrays)
         self.fem_disp_history = []      # Spostamenti [Step][Nodi][3]
-        self.fem_stress_history = []    # Sollecitazioni [Step][Nodi] (scalari, es. Von Mises)
+        self.fem_stress_history = []    # Sollecitazioni [Step][Nodi] (scalari, es. Von Mises con segno)
         
         self.fem_coords = None          # Coordinate nodali indeformate [Nodi][3]
         self.fem_solid_elems = []       # Elementi HEX8
         self.fem_bar_elems = []         # Elementi TRUSS
         
-        self.max_disp = 1.0             # Valore max per normalizzazione colore disp
-        self.max_stress = 1.0           # Valore max per normalizzazione colore stress
+        # Massimi globali (di tutta la storia)
+        self.max_disp_global = 1.0            
+        self.max_stress_global = 1.0          
         self.deformation_scale = 1.0    # Scala visiva della deformata
+
+        # SCALA DINAMICA (Minimo e Massimo visibile nel frame corrente)
+        self.current_visible_max = 1.0
+        self.current_visible_min = 0.0  # <--- NUOVO: Gestione minimi (Trazione)
+
+        # Cache indici nodi per categoria (per calcolo veloce scala)
+        self._nodes_concrete_indices = []
+        self._nodes_bars_indices = []
+        self._nodes_stirrups_indices = []
 
         # --- ANIMAZIONE FEM ---
         self.animation_timer = QTimer()
@@ -83,22 +92,18 @@ class BeamMeshWidget(QOpenGLWidget):
         self.is_animating = False
 
         # --- CAMERA ---
-        # Rotazione X: 30 gradi per guardare dall'alto verso il basso
         self.rot_x = 30.0   
-        # Rotazione Y: -45 gradi per vedere l'oggetto "d'angolo" (primo quadrante)
         self.rot_y = -45.0  
-        # Distanza: DEVE essere positiva. 15.0/20.0 è un buon valore per stare "distanti"
         self.distance = 5
-        # Zoom ortogonale: DEVE essere positivo
         self.ortho_zoom = 1.5
         
-        self.pan_x = 2
-        self.pan_y = 1
+        self.pan_x = 0
+        self.pan_y = 0
         self.last_pos = None
 
         self.view_mode = '3d'
         self.setMinimumSize(200, 150)
-        self.setFocusPolicy(Qt.StrongFocus) # Necessario per keyPressEvent
+        self.setFocusPolicy(Qt.StrongFocus) 
 
         self._ortho_default_zoom = 0.2
         self._background_color = (40.0 / 255.0, 40.0 / 255.0, 40.0 / 255.0, 1.0)
@@ -150,13 +155,9 @@ class BeamMeshWidget(QOpenGLWidget):
         if not _HAS_GL:
             return
         
-        # --- FIX CRUCIALE PER LA TRASPARENZA ---
-        # QPainter (usato per la legenda) disabilita il Depth Test.
-        # Dobbiamo riabilitarlo forzatamente QUI, ad ogni frame, 
-        # altrimenti la trave sembrerà trasparente/confusionaria.
+        # Riabilita Depth Test per evitare problemi con QPainter
         glEnable(GL_DEPTH_TEST) 
         glDepthMask(GL_TRUE)
-        # ---------------------------------------
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glMatrixMode(GL_MODELVIEW)
@@ -192,10 +193,7 @@ class BeamMeshWidget(QOpenGLWidget):
 
     # --- DISEGNO 2D OVERLAY (LEGENDA) ---
     def paintEvent(self, event):
-        # 1. Chiama paintGL (Rendering 3D Standard)
         super().paintEvent(event)
-
-        # 2. Se siamo in modalità FEM, disegna la scala colori sopra il 3D
         if self.fem_mode:
             painter = QPainter(self)
             painter.setRenderHint(QPainter.Antialiasing)
@@ -203,18 +201,18 @@ class BeamMeshWidget(QOpenGLWidget):
             painter.end()
 
     def _draw_legend_overlay(self, painter: QPainter):
-        """Disegna la scala dei colori sulla destra (stile FEM)"""
+        """Disegna la scala dei colori con gestione range Min-Max (Trazione-Compressione)"""
         w = self.width()
         h = self.height()
         
         # Dimensioni e posizione legenda
         bar_width = 50
         bar_height = min(700, h - 60)
-        margin_right = 110 # spazio per il testo a destra
+        margin_right = 110 
         x_pos = w - margin_right - bar_width
         y_pos = (h - bar_height) // 2
         
-        # Sfondo semitrasparente scuro per leggibilità
+        # Sfondo
         bg_rect_x = x_pos - 10
         bg_rect_y = y_pos - 25
         bg_rect_w = bar_width + margin_right - 30
@@ -224,16 +222,19 @@ class BeamMeshWidget(QOpenGLWidget):
         painter.setBrush(QColor(25,25,25, 180))
         painter.drawRoundedRect(bg_rect_x, bg_rect_y, bg_rect_w, bg_rect_h, 5, 5)
 
-        # Valori di riferimento
-        max_val = 1.0
-        title = ""
-        
+        # Valori di riferimento MIN e MAX
+        max_val = self.current_visible_max
+        min_val = self.current_visible_min
+
+        # Se è 'disp' (magnitudo), il minimo è sempre 0
         if self.fem_result_type == 'disp':
-            max_val = self.max_disp
+            min_val = 0.0
             title = "Spost. [m]"
         else:
-            max_val = self.max_stress
             title = "Stress [Pa]"
+
+        val_range = max_val - min_val
+        if abs(val_range) < 1e-12: val_range = 1.0
 
         # Titolo
         painter.setPen(Qt.white)
@@ -244,15 +245,15 @@ class BeamMeshWidget(QOpenGLWidget):
         painter.drawText(bg_rect_x, bg_rect_y, bg_rect_w, -45, Qt.AlignCenter, title)
 
         # Gradiente
-        gradient = QLinearGradient(x_pos, y_pos + bar_height, x_pos, y_pos) # Dal basso all'alto
+        gradient = QLinearGradient(x_pos, y_pos + bar_height, x_pos, y_pos) 
         
         if self.fem_result_type == 'disp':
-            # Blu -> Rosso
+            # Blu (0) -> Rosso (Max)
             gradient.setColorAt(0.0, QColor(0, 0, 255))
             gradient.setColorAt(0.5, QColor(255, 0, 255))
             gradient.setColorAt(1.0, QColor(255, 0, 0))
         else:
-            # Jet Map (Blu->Ciano->Verde->Giallo->Rosso)
+            # Jet Map Completa: Blu (Min/Trazione) -> Rosso (Max/Compressione)
             gradient.setColorAt(0.00, QColor(0, 0, 255))
             gradient.setColorAt(0.25, QColor(0, 255, 255))
             gradient.setColorAt(0.50, QColor(0, 255, 0))
@@ -271,17 +272,20 @@ class BeamMeshWidget(QOpenGLWidget):
         num_ticks = 5
         for i in range(num_ticks):
             ratio = i / (num_ticks - 1) 
-            val = ratio * max_val
             
-            # Y invertita per il testo (0 in basso)
+            # Interpolazione lineare tra Min e Max
+            val = min_val + ratio * val_range
+            
             y_tick = y_pos + bar_height - (ratio * bar_height)
             
-            # Lineetta
             painter.drawLine(x_pos + bar_width, int(y_tick), x_pos + bar_width + 5, int(y_tick))
             
-            # Testo
-            text_str = f"{val:.2e}" if (max_val > 1000 or max_val < 0.01 and max_val != 0) else f"{val:.2f}"
-            painter.drawText(x_pos + bar_width + 8, int(y_tick) - 10, 50, 20, Qt.AlignLeft | Qt.AlignVCenter, text_str)
+            if abs(val) > 1000 or (abs(val) < 0.01 and abs(val) > 1e-12):
+                text_str = f"{val:.2e}"
+            else:
+                text_str = f"{val:.2f}"
+                
+            painter.drawText(x_pos + bar_width + 8, int(y_tick) - 10, 60, 20, Qt.AlignLeft | Qt.AlignVCenter, text_str)
 
     # ------------------------------------------------------------------
     # Helpers Disegno
@@ -338,7 +342,7 @@ class BeamMeshWidget(QOpenGLWidget):
         glEnd()
         glEnable(GL_LIGHTING)
 
-    # ------------------------------------------------------------------
+     # ------------------------------------------------------------------
     # GESTIONE FEM
     # ------------------------------------------------------------------
     def set_fem_results(self, 
@@ -356,16 +360,32 @@ class BeamMeshWidget(QOpenGLWidget):
         self.fem_solid_elems = solid_elems
         self.fem_bar_elems = bar_elems
         
-        self.max_disp = max_disp if max_disp > 1e-9 else 1.0
-        self.max_stress = max_stress if max_stress > 1e-9 else 1.0
+        # Salviamo i globali come fallback
+        self.max_disp_global = max_disp if max_disp > 1e-9 else 1.0
+        self.max_stress_global = max_stress if max_stress > 1e-9 else 1.0
         
+        # --- PRE-CALCOLO INDICI PER CATEGORIA (Per scala dinamica) ---
+        c_nodes = set()
+        for el in solid_elems:
+            c_nodes.update(el['nodes'])
+        self._nodes_concrete_indices = list(c_nodes)
+
+        b_nodes = set()
+        s_nodes = set()
+        for el in bar_elems:
+            # Assumiamo che il generatore usi 'TRUSS_LONG' e 'TRUSS_STIR'
+            if el.get('type') == 'TRUSS_LONG':
+                b_nodes.update(el['nodes'])
+            else:
+                s_nodes.update(el['nodes'])
+        self._nodes_bars_indices = list(b_nodes)
+        self._nodes_stirrups_indices = list(s_nodes)
+        # -------------------------------------------------------------
+
         self.fem_mode = True
-        
-        # Reset animazione
         self.start_animation()
 
     def set_result_type(self, r_type: str):
-        """ 'disp' or 'stress' """
         if r_type in ['disp', 'stress']:
             self.fem_result_type = r_type
             self.update()
@@ -373,8 +393,11 @@ class BeamMeshWidget(QOpenGLWidget):
     # --- ANIMAZIONE ---
     def start_animation(self):
         self.is_animating = True
-        self.anim_frame = 0.0
-        self.animation_timer.start(50) # 20 FPS
+        # Resetto il frame solo se siamo alla fine
+        if self.anim_frame >= len(self.fem_disp_history) - 1:
+            self.anim_frame = 0.0
+        self.animation_timer.start(100)
+
 
     def stop_animation(self):
         self.is_animating = False
@@ -383,28 +406,30 @@ class BeamMeshWidget(QOpenGLWidget):
     def _update_animation(self):
         if not self.fem_disp_history:
             return
-        
         self.anim_frame += self.anim_speed
-        
-        # Stop alla fine, non loop
         max_frame = len(self.fem_disp_history) - 1
         if self.anim_frame >= max_frame:
             self.anim_frame = float(max_frame)
             self.stop_animation()
-        
         self.update()
 
     def keyPressEvent(self, event):
-        # Riavvia animazione con SPACE
         if self.fem_mode and event.key() == Qt.Key_Space:
-            self.start_animation()
+            if self.is_animating:
+                self.stop_animation()     # Se sta animando → ferma
+            else:
+                self.start_animation()    # Se è ferma → avvia
+            return                        # Evita di propagare l'evento
         super().keyPressEvent(event)
+
+
+    
 
     # --- CALCOLO DATI FRAME CORRENTE ---
     def _get_frame_data(self):
         """
-        Ritorna (coords_deformate, values_per_node)
-        values_per_node dipende dal fem_result_type (magnitudo spostamento o stress)
+        Ritorna (coords_deformate, values_per_node, global_max)
+        Il global_max qui è solo il riferimento, poi viene raffinato in draw
         """
         if not self.fem_disp_history:
             return self.fem_coords, np.zeros(len(self.fem_coords)), 1.0
@@ -418,74 +443,105 @@ class BeamMeshWidget(QOpenGLWidget):
         deformed_coords = self.fem_coords + u_curr.reshape(-1, 3) * self.deformation_scale
         
         values = np.zeros(len(deformed_coords))
+        global_ref = 1.0
 
         if self.fem_result_type == 'disp':
-            # Magnitudo spostamento
+            # Magnitudo spostamento (Sempre positivo)
             values = np.linalg.norm(u_curr.reshape(-1, 3), axis=1)
-            norm_val = self.max_disp
+            global_ref = self.max_disp_global
         else:
-            # Stress (se presente)
-            norm_val = self.max_stress
+            # Stress (Può essere negativo)
+            global_ref = self.max_stress_global
             if self.fem_stress_history and len(self.fem_stress_history) > 0:
                 s_floor = self.fem_stress_history[idx_floor]
                 s_ceil = self.fem_stress_history[idx_ceil]
-                # Assumiamo s_floor sia array di scalari (N_nodi,)
                 s_curr = s_floor * (1.0 - alpha) + s_ceil * alpha
                 values = s_curr
             else:
                 values = np.zeros(len(deformed_coords))
 
-        return deformed_coords, values, norm_val
+        return deformed_coords, values, global_ref
 
     # --- MAPPE COLORI ---
     def _get_color_disp(self, val, max_val):
         """ Deformazioni: Blu (0) -> Rosso (Max) """
+        if max_val < 1e-12: max_val = 1.0
         t = val / max_val
         t = max(0.0, min(1.0, t))
-        # Blu -> Rosso
         return (t, 0.0, 1.0 - t)
 
-    def _get_color_stress(self, val, max_val):
-        """ Sollecitazioni: Jet Map (Blu->Ciano->Verde->Giallo->Rosso) """
-        t = val / max_val
+    def _get_color_stress(self, val, min_val, max_val):
+        """ 
+        Sollecitazioni: Jet Map che copre il range [min_val, max_val]
+        Blu = min_val (es. -10 MPa)
+        Rosso = max_val (es. +20 MPa)
+        """
+        denom = max_val - min_val
+        if abs(denom) < 1e-12: denom = 1.0
+        
+        # Normalizza tra 0 e 1
+        t = (val - min_val) / denom
         t = max(0.0, min(1.0, t))
         
-        # Logica Jet semplificata
-        # 0.00 - 0.25: Blu -> Ciano (0, G, 1)
-        # 0.25 - 0.50: Ciano -> Verde (0, 1, B) decrescente B
-        # 0.50 - 0.75: Verde -> Giallo (R, 1, 0) crescente R
-        # 0.75 - 1.00: Giallo -> Rosso (1, G, 0) decrescente G
-        
         r, g, b = 0.0, 0.0, 0.0
-        
         if t < 0.25:
-            # Blu (0,0,1) -> Ciano (0,1,1)
             slope = t * 4.0
             r, g, b = 0.0, slope, 1.0
         elif t < 0.5:
-            # Ciano (0,1,1) -> Verde (0,1,0)
             slope = (t - 0.25) * 4.0
             r, g, b = 0.0, 1.0, 1.0 - slope
         elif t < 0.75:
-            # Verde (0,1,0) -> Giallo (1,1,0)
             slope = (t - 0.5) * 4.0
             r, g, b = slope, 1.0, 0.0
         else:
-            # Giallo (1,1,0) -> Rosso (1,0,0)
             slope = (t - 0.75) * 4.0
             r, g, b = 1.0, 1.0 - slope, 0.0
-            
         return (r, g, b)
 
     def _draw_fem_results(self):
-        deformed_coords, values, norm_val = self._get_frame_data()
+        # 1. Recupera dati frame corrente
+        deformed_coords, values, global_norm = self._get_frame_data()
         
-        # Helper per colore
+        # 2. CALCOLO SCALA ADATTIVA (DYNAMIC RANGE)
+        # Identifica quali nodi sono visibili al momento
+        active_indices = []
+        if self.show_concrete:
+            active_indices.extend(self._nodes_concrete_indices)
+        if self.show_bars:
+            active_indices.extend(self._nodes_bars_indices)
+        if self.show_stirrups:
+            active_indices.extend(self._nodes_stirrups_indices)
+            
+        if active_indices and len(values) > 0:
+            # Filtra indici validi e unici
+            idx_arr = np.array(active_indices, dtype=int)
+            idx_arr = idx_arr[idx_arr < len(values)]
+            
+            if len(idx_arr) > 0:
+                # Calcola MIN e MAX tra i nodi visibili
+                vis_max = np.max(values[idx_arr])
+                vis_min = np.min(values[idx_arr])
+                
+                self.current_visible_max = vis_max
+                self.current_visible_min = vis_min
+            else:
+                self.current_visible_max = global_norm
+                self.current_visible_min = 0.0
+        else:
+            self.current_visible_max = global_norm
+            self.current_visible_min = 0.0
+
+        max_v = self.current_visible_max
+        min_v = self.current_visible_min
+        # --------------------------------------------
+
         def get_color(v):
             if self.fem_result_type == 'disp':
-                return self._get_color_disp(v, norm_val)
+                # Per gli spostamenti, il minimo è sempre 0
+                return self._get_color_disp(v, max_v)
             else:
-                return self._get_color_stress(v, norm_val)
+                # Per gli stress, passiamo sia min che max
+                return self._get_color_stress(v, min_v, max_v)
 
         faces_idx = [
             [0,1,2,3], [4,5,6,7], [0,1,5,4], 
@@ -526,12 +582,12 @@ class BeamMeshWidget(QOpenGLWidget):
                 glEnd()
                 glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
 
-        # 2) Barre e Staffe con Colore Variabile
+        # 2) Barre e Staffe
         glEnable(GL_LIGHTING)
         glLineWidth(2.5)
         glBegin(GL_LINES)
         for b in self.fem_bar_elems:
-            is_long = (b['type'] == 'TRUSS_LONG')
+            is_long = (b.get('type') == 'TRUSS_LONG')
             if is_long and not self.show_bars: continue
             if not is_long and not self.show_stirrups: continue
 
@@ -539,12 +595,10 @@ class BeamMeshWidget(QOpenGLWidget):
             p1 = deformed_coords[n1]
             p2 = deformed_coords[n2]
             
-            # Colore nodo 1
             c1 = get_color(values[n1])
             glColor3f(*c1)
             glVertex3f(*p1)
             
-            # Colore nodo 2
             c2 = get_color(values[n2])
             glColor3f(*c2)
             glVertex3f(*p2)
@@ -619,7 +673,6 @@ class BeamMeshWidget(QOpenGLWidget):
             self.ortho_zoom = max(0.001, self._ortho_default_zoom)
         self.resizeGL(self.width(), self.height())
         self.update()
-
 
 # ------------------------------------------------------------------
 # Core generator

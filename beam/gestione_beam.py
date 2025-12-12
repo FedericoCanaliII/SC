@@ -13,6 +13,7 @@ from beam.valori import BeamValori
 from beam.mesh import BeamMeshGenerator
 # Aggiungi all'import
 from beam.calcolo import BeamCalcolo
+from beam.calcolo_dg import BeamCalcolo_dg
 
 
 class GestioneBeam:
@@ -31,14 +32,26 @@ class GestioneBeam:
         self.beam_mesh_generator = BeamMeshGenerator(self, ui, self.gestione_sezioni.section_manager, self.gestione_materiali)
 
         # --- INTEGRAZIONE CALCOLO ---
-        self.beam_calcolo = BeamCalcolo(self.parent, self.ui, self.beam_mesh_generator)
-        
-        try:
-            if hasattr(self.ui, 'beam_fem'):
-                self.ui.beam_fem.clicked.connect(self.beam_calcolo.start_fem_analysis)
-        except Exception:
-            traceback.print_exc()
 
+        btn_group_metodo_beam = QButtonGroup(self.parent)
+
+        btn_group_metodo_beam.addButton(self.ui.btn_beam_continuo)
+        btn_group_metodo_beam.addButton(self.ui.btn_beam_discontinuo)
+
+        #comportamento esclusivo
+        btn_group_metodo_beam.setExclusive(True)
+
+        #Imposto i pulsanti come checkable
+        self.ui.btn_beam_continuo.setCheckable(True)
+        self.ui.btn_beam_discontinuo.setCheckable(True)
+
+        QtCore.QTimer.singleShot(0, self.ui.btn_beam_continuo.click)
+
+        self.beam_calcolo_dg = BeamCalcolo_dg(self.parent, self.ui, self.beam_mesh_generator)
+        self.beam_calcolo = BeamCalcolo(self.parent, self.ui, self.beam_mesh_generator)
+
+        # Collego una volta sola
+        self.ui.beam_fem.clicked.connect(self.run_beam_analysis)
 
         # BTN GRUPPI MAIN
         btn_group_viste_beam = QButtonGroup(self.parent)
@@ -59,6 +72,7 @@ class GestioneBeam:
         self.ui.btn_beam_xy.setCheckable(True)
 
         QtCore.QTimer.singleShot(0, self.ui.btn_beam_3d.click)
+        self.ui.progressBar_beam.setValue(0)
 
         # collega il pulsante che popola la combobox per il beam
         try:
@@ -73,6 +87,17 @@ class GestioneBeam:
             combo = getattr(self.ui, 'combobox_beam_sezioni', None)
             if combo is not None and isinstance(combo, QComboBox):
                 combo.currentIndexChanged.connect(self._on_beam_combo_changed)
+        except Exception:
+            traceback.print_exc()
+
+    def run_beam_analysis(self):
+        try:
+            if self.ui.btn_beam_continuo.isChecked():
+                self.beam_calcolo.start_fem_analysis()
+            elif self.ui.btn_beam_discontinuo.isChecked():
+                self.beam_calcolo_dg.start_fem_analysis()
+            else:
+                print("Nessun metodo selezionato.")
         except Exception:
             traceback.print_exc()
 

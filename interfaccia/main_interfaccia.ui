@@ -578,7 +578,7 @@ QPushButton:hover {
        <string notr="true">background-color: rgb(40, 40, 40);</string>
       </property>
       <property name="currentIndex">
-       <number>2</number>
+       <number>4</number>
       </property>
       <widget class="QWidget" name="page">
        <layout class="QVBoxLayout" name="verticalLayout_27">
@@ -2144,7 +2144,7 @@ padding-left: 5px;
 border-radius:4px</string>
                      </property>
                      <property name="text">
-                      <string>0</string>
+                      <string>-0.0004</string>
                      </property>
                     </widget>
                    </item>
@@ -9254,6 +9254,149 @@ color: rgb(255,255,255);</string>
                 </widget>
                </item>
                <item>
+                <spacer name="verticalSpacer_51">
+                 <property name="orientation">
+                  <enum>Qt::Vertical</enum>
+                 </property>
+                 <property name="sizeType">
+                  <enum>QSizePolicy::Fixed</enum>
+                 </property>
+                 <property name="sizeHint" stdset="0">
+                  <size>
+                   <width>20</width>
+                   <height>20</height>
+                  </size>
+                 </property>
+                </spacer>
+               </item>
+               <item>
+                <widget class="QFrame" name="frame_25">
+                 <property name="styleSheet">
+                  <string notr="true">background-color: rgb(40,40,40);
+border-radius: 4px;</string>
+                 </property>
+                 <property name="frameShape">
+                  <enum>QFrame::StyledPanel</enum>
+                 </property>
+                 <property name="frameShadow">
+                  <enum>QFrame::Raised</enum>
+                 </property>
+                 <layout class="QGridLayout" name="gridLayout_14">
+                  <item row="0" column="0">
+                   <layout class="QHBoxLayout" name="horizontalLayout_31">
+                    <item>
+                     <widget class="QPushButton" name="btn_beam_continuo">
+                      <property name="sizePolicy">
+                       <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                        <horstretch>0</horstretch>
+                        <verstretch>0</verstretch>
+                       </sizepolicy>
+                      </property>
+                      <property name="minimumSize">
+                       <size>
+                        <width>170</width>
+                        <height>32</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>170</width>
+                        <height>32</height>
+                       </size>
+                      </property>
+                      <property name="styleSheet">
+                       <string notr="true">QPushButton{
+    font:400 12pt &quot;Segoe UI&quot;;
+    color: rgb(255,255,255);
+	padding-bottom: 4px;
+	border-radius:4px;
+	border: none
+}
+QPushButton:hover {
+    background-color: rgb(40,40,40);
+	border: 1px solid rgb(120,120,120);
+}
+QPushButton:checked {
+    background-color: rgb(50,50,50);
+}</string>
+                      </property>
+                      <property name="text">
+                       <string>Continua (CG)</string>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>35</width>
+                        <height>35</height>
+                       </size>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <spacer name="horizontalSpacer_41">
+                      <property name="orientation">
+                       <enum>Qt::Horizontal</enum>
+                      </property>
+                      <property name="sizeHint" stdset="0">
+                       <size>
+                        <width>40</width>
+                        <height>20</height>
+                       </size>
+                      </property>
+                     </spacer>
+                    </item>
+                    <item>
+                     <widget class="QPushButton" name="btn_beam_discontinuo">
+                      <property name="sizePolicy">
+                       <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                        <horstretch>0</horstretch>
+                        <verstretch>0</verstretch>
+                       </sizepolicy>
+                      </property>
+                      <property name="minimumSize">
+                       <size>
+                        <width>170</width>
+                        <height>32</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>170</width>
+                        <height>32</height>
+                       </size>
+                      </property>
+                      <property name="styleSheet">
+                       <string notr="true">QPushButton{
+    font:400 12pt &quot;Segoe UI&quot;;
+    color: rgb(255,255,255);
+	padding-bottom: 4px;
+	border-radius:4px;
+	border: none
+}
+QPushButton:hover {
+    background-color: rgb(40,40,40);
+	border: 1px solid rgb(120,120,120);
+}
+QPushButton:checked {
+    background-color: rgb(50,50,50);
+}</string>
+                      </property>
+                      <property name="text">
+                       <string>Discontinua (DG)</string>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>35</width>
+                        <height>35</height>
+                       </size>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </item>
+                 </layout>
+                </widget>
+               </item>
+               <item>
                 <spacer name="verticalSpacer_33">
                  <property name="orientation">
                   <enum>Qt::Vertical</enum>
@@ -9946,7 +10089,7 @@ padding-left: 5px;
 border-radius:4px</string>
                     </property>
                     <property name="text">
-                     <string>0.0001</string>
+                     <string>-0.1</string>
                     </property>
                    </widget>
                   </item>
@@ -10464,7 +10607,7 @@ padding-left: 5px;
 border-radius:4px</string>
                     </property>
                     <property name="text">
-                     <string>1000</string>
+                     <string>100</string>
                     </property>
                    </widget>
                   </item>
