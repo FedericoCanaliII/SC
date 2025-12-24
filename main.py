@@ -141,6 +141,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ui.progressBar_verifica.setValue(0)
         self.ui.progressBar_verifica_MC.setValue(0)
 
+        # COLLEGAMENTO TASTO STAMPA
+        self.ui.btn_main_stampa.clicked.connect(self.salva_screenshot)
+
     def append_terminal_text(self, text):
         """Funzione chiamata ogni volta che c'è un print()"""
         # --- TERMINALE 1 ---
@@ -171,6 +174,32 @@ class MainWindow(QtWidgets.QMainWindow):
         sys.stdout = self.sys_stdout_backup
         sys.stderr = self.sys_stderr_backup
         super().closeEvent(event)
+
+    def salva_screenshot(self):
+        """Cattura uno screenshot fedele della finestra usando lo schermo."""
+        opzioni = QtWidgets.QFileDialog.Options()
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, 
+            "Salva Screenshot", 
+            "Screenshot_SectionCHECK.png", 
+            "PNG Files (*.png);;JPEG Files (*.jpg *.jpeg)", 
+            options=opzioni
+        )
+
+        if file_path:
+            # Otteniamo lo schermo su cui si trova la finestra
+            screen = QtWidgets.QApplication.primaryScreen()
+            if screen:
+                # Cattura esattamente l'area occupata dalla finestra (compresi i widget OpenGL)
+                # winId() permette di catturare il contenuto renderizzato dalla GPU
+                screenshot = screen.grabWindow(self.winId())
+                
+                successo = screenshot.save(file_path)
+
+                if successo:
+                    print(f">> Screenshot salvato (metodo Screen): {file_path}")
+                else:
+                    print(">> Errore nel salvataggio.")
              
 if __name__ == "__main__":
     app = QApplication(sys.argv)

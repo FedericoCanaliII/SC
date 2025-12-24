@@ -225,17 +225,10 @@ class SezioneRinforzata:
                             break
                 
                 if found_mat and found_mat in mat_to_id:
-                        in_bar = False
-                        for b in self.barre:
-                            if (x-b['x'])**2 + (y-b['y'])**2 < (b['diam']/2)**2:
-                                in_bar = True
-                                break
-                        
-                        if not in_bar:
-                            punti_x.append(x)
-                            punti_y.append(y)
-                            aree.append(dA)
-                            mat_idx.append(mat_to_id[found_mat])
+                    punti_x.append(x)
+                    punti_y.append(y)
+                    aree.append(dA)
+                    mat_idx.append(mat_to_id[found_mat])
 
         self.mesh_x = np.array(punti_x, dtype=np.float64)
         self.mesh_y = np.array(punti_y, dtype=np.float64)
