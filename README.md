@@ -1,6 +1,8 @@
 # SectionCheck
 
-![logo](interfaccia/icone/logo.png)
+<p align="center">
+  <img src="interfaccia/icone/logo.png" width="100">
+</p>
 
 Descrizione:
 
