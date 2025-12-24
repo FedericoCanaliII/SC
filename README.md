@@ -1,4 +1,6 @@
-SectionCheck
+# SectionCheck
+
+![logo](interfaccia/icone/logo.png)
 
 Descrizione:
 
@@ -11,6 +13,8 @@ Funzionalità Principali:
 - Geometria Libera: Disegno di sezioni di qualunque forma, con barre longitudinali e staffe.
 
 - Domini di Interazione: Calcolo e visualizzazione dei domini di interazione tridimensionali M-N (Momento-Sforzo Normale).
+
+- Diagramma Momento-Curvatura: Calcolo e visualizzazione dei diagrammi momento-curvatura tridimenzionali (360°)
 
 - Analisi FEM: Solver agli elementi finiti con comportamento non lineare dei materiali.
 
