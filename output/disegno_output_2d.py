@@ -393,7 +393,7 @@ class Domain2DWidget(QOpenGLWidget):
             if abs(x) > 1e-9:
                 sx, sy = to_screen(x, 0)
                 painter.drawLine(sx, sy-4, sx, sy+4)
-                label = f"{x:.3g}"
+                label = f"{x:.4g}"
                 tw = metrics.horizontalAdvance(label)
                 # Se asse X esce schermo vert, clamp label
                 txt_y = sy + metrics.height() + 2
@@ -409,7 +409,7 @@ class Domain2DWidget(QOpenGLWidget):
             if abs(y) > 1e-9:
                 sx, sy = to_screen(0, y)
                 painter.drawLine(sx-4, sy, sx+4, sy)
-                label = f"{y:.3g}"
+                label = f"{y:.4g}"
                 tw = metrics.horizontalAdvance(label)
                 # Se asse Y esce schermo orizz, clamp label
                 txt_x = sx - tw - 6
